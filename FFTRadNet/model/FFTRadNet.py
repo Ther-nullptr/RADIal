@@ -29,6 +29,11 @@ class Detection_Header(nn.Module):
             self.bn1 = nn.BatchNorm2d(144)
             self.conv2 = conv3x3(144, 96, bias=bias)
             self.bn2 = nn.BatchNorm2d(96)
+        elif(self.input_angle_size==112):  # Added support for reduced model
+            self.conv1 = conv3x3(128, 72, bias=bias)  # Input from reduced RA decoder: 128 channels
+            self.bn1 = nn.BatchNorm2d(72)
+            self.conv2 = conv3x3(72, 48, bias=bias)  # Halved from 96
+            self.bn2 = nn.BatchNorm2d(48)
         elif(self.input_angle_size==448):
             self.conv1 = conv3x3(256, 144, bias=bias,stride=(1,2))
             self.bn1 = nn.BatchNorm2d(144)
@@ -43,13 +48,21 @@ class Detection_Header(nn.Module):
             raise NameError('Wrong channel angle paraemter !')
             return
 
-        self.conv3 = conv3x3(96, 96, bias=bias)
-        self.bn3 = nn.BatchNorm2d(96)
-        self.conv4 = conv3x3(96, 96, bias=bias)
-        self.bn4 = nn.BatchNorm2d(96)
-
-        self.clshead = conv3x3(96, 1, bias=True)
-        self.reghead = conv3x3(96, reg_layer, bias=True)
+        # Adjust conv3 and conv4 based on input angle size
+        if(self.input_angle_size==112):  # Reduced model
+            self.conv3 = conv3x3(48, 48, bias=bias)  # Halved from 96
+            self.bn3 = nn.BatchNorm2d(48)
+            self.conv4 = conv3x3(48, 48, bias=bias)  # Halved from 96  
+            self.bn4 = nn.BatchNorm2d(48)
+            self.clshead = conv3x3(48, 1, bias=True)  # Use 48 instead of 96
+            self.reghead = conv3x3(48, reg_layer, bias=True)  # Use 48 instead of 96
+        else:  # Original sizes for other configurations
+            self.conv3 = conv3x3(96, 96, bias=bias)
+            self.bn3 = nn.BatchNorm2d(96)
+            self.conv4 = conv3x3(96, 96, bias=bias)
+            self.bn4 = nn.BatchNorm2d(96)
+            self.clshead = conv3x3(96, 1, bias=True)
+            self.reghead = conv3x3(96, reg_layer, bias=True)
             
     def forward(self, x):
 
@@ -220,18 +233,54 @@ class BasicBlock(nn.Module):
         return out
 
 class RangeAngle_Decoder(nn.Module):
-    def __init__(self, ):
+    def __init__(self, channels):
         super(RangeAngle_Decoder, self).__init__()
         
-        # Top-down layers
-        self.deconv4 = nn.ConvTranspose2d(16, 16, kernel_size=3, stride=(2,1), padding=1, output_padding=(1,0))
+        # Check if this is the original configuration
+        is_original = (channels == [32, 40, 48, 56])
         
-        self.conv_block4 = BasicBlock(48,128)
-        self.deconv3 = nn.ConvTranspose2d(128, 128, kernel_size=3, stride=(2,1), padding=1, output_padding=(1,0))
-        self.conv_block3 = BasicBlock(192,256)
+        # Calculate actual dimensions based on backbone output
+        c2_channels = channels[1] * 4  # x2 channels
+        c3_channels = channels[2] * 4  # x3 channels  
+        c4_channels = channels[3] * 4  # x4 channels
+        
+        # The spatial dimensions after backbone are fixed regardless of channel config:
+        # x4: [B, c4_channels, 16, 14] -> after transpose(1,3): [B, 14, 16, c4_channels] 
+        # x3: [B, c3_channels, 32, 28] -> after L3+transpose: [B, 28, 32, L3_output]
+        # x2: [B, c2_channels, 64, 56] -> after L2+transpose: [B, 56, 64, L2_output]
+        
+        width_x4_after_transpose = 14  # x4 width becomes channel dim
+        width_x3_after_transpose = 28  # x3 width becomes channel dim
+        width_x2_after_transpose = 56  # x2 width becomes channel dim
+        
+        if is_original:
+            # Original configuration values
+            l3_output_channels = 224
+            l2_output_channels = 224
+            conv_block4_output = 128
+            conv_block3_output = 256
+        else:
+            # Reduced configuration - scale down
+            l3_output_channels = 112  # 224/2
+            l2_output_channels = 112  # 224/2  
+            conv_block4_output = 64   # 128/2
+            conv_block3_output = 128  # 256/2
+        
+        # Top-down layers  
+        self.deconv4 = nn.ConvTranspose2d(width_x4_after_transpose, width_x4_after_transpose, 
+                                         kernel_size=3, stride=(2,1), padding=1, output_padding=(1,0))
+        
+        # Concatenation: deconv4 + L3_after_transpose  
+        self.conv_block4 = BasicBlock(width_x4_after_transpose + width_x3_after_transpose, conv_block4_output)
+        self.deconv3 = nn.ConvTranspose2d(conv_block4_output, conv_block4_output, 
+                                         kernel_size=3, stride=(2,1), padding=1, output_padding=(1,0))
+        
+        # Concatenation: deconv3 + L2_after_transpose
+        self.conv_block3 = BasicBlock(conv_block4_output + width_x2_after_transpose, conv_block3_output)
 
-        self.L3  = nn.Conv2d(192, 224, kernel_size=1, stride=1,padding=0)
-        self.L2  = nn.Conv2d(160, 224, kernel_size=1, stride=1,padding=0)
+        # Projection layers
+        self.L3  = nn.Conv2d(c3_channels, l3_output_channels, kernel_size=1, stride=1, padding=0)
+        self.L2  = nn.Conv2d(c2_channels, l2_output_channels, kernel_size=1, stride=1, padding=0)
         
         
     def forward(self,features):
@@ -257,13 +306,17 @@ class FFTRadNet(nn.Module):
         self.segmentation_head = segmentation_head
 
         self.FPN = FPN_BackBone(num_block=blocks,channels=channels,block_expansion=4, mimo_layer = mimo_layer,use_bn = True)
-        self.RA_decoder = RangeAngle_Decoder()
+        self.RA_decoder = RangeAngle_Decoder(channels)
         
         if(self.detection_head):
             self.detection_header = Detection_Header(input_angle_size=channels[3]*4,reg_layer=regression_layer)
 
         if(self.segmentation_head):
-            self.freespace = nn.Sequential(BasicBlock(256,128),BasicBlock(128,64),nn.Conv2d(64, 1, kernel_size=1))
+            # Make segmentation head configurable based on RA decoder output
+            if channels == [32, 40, 48, 56]:  # Original
+                self.freespace = nn.Sequential(BasicBlock(256,128),BasicBlock(128,64),nn.Conv2d(64, 1, kernel_size=1))
+            else:  # Reduced
+                self.freespace = nn.Sequential(BasicBlock(128,64),BasicBlock(64,32),nn.Conv2d(32, 1, kernel_size=1))
 
     def forward(self,x):
                        
