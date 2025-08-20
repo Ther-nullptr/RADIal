@@ -7,7 +7,7 @@ import torchvision.transforms as transform
 import pandas as pd
 from PIL import Image
 
-class RADIal(Dataset):
+class ComplexRADIal(Dataset):
 
     def __init__(self, root_dir, statistics=None, encoder=None, difficult=False):
 
@@ -24,7 +24,6 @@ class RADIal(Dataset):
             ids_filters.append(ids)
             ids_filters = np.unique(np.concatenate(ids_filters))
             self.labels = self.labels[ids_filters]
-
 
         # Gather each input entries by their sample id
         self.unique_ids = np.unique(self.labels[:,0])
@@ -76,6 +75,12 @@ class RADIal(Dataset):
                 radar_FFT[...,i] -= self.statistics['input_mean'][i]
                 radar_FFT[...,i] /= self.statistics['input_std'][i]
 
+        # After preprocessing, recombine into complex format
+        num_channels = radar_FFT.shape[2] // 2  # Should be 16
+        real_part = radar_FFT[..., :num_channels]
+        imag_part = radar_FFT[..., num_channels:]
+        radar_FFT = real_part + 1j * imag_part  # Shape: [height, width, 16_channels]
+        
         # Read the segmentation map
         segmap_name = os.path.join(self.root_dir,'radar_Freespace',"freespace_{:06d}.png".format(sample_id))
         segmap = Image.open(segmap_name) # [512,900]

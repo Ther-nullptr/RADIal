@@ -74,7 +74,10 @@ def run_FullEvaluation(net,loader,encoder,iou_threshold=0.5):
     for i, data in enumerate(loader):
 
         # input, out_label,segmap,labels
-        inputs = data[0].to('cuda').float()
+        if data[0].dtype != torch.complex64:
+            inputs = data[0].to('cuda').float()
+        else:
+            inputs = data[0].to('cuda')
 
         with torch.set_grad_enabled(False):
             outputs = net(inputs)

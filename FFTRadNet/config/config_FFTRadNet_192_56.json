@@ -9,7 +9,7 @@
         "SegmentationHead": "True"
     },
     "dataset": {
-        "root_dir": "/media/julien/HD_RADAR1/FinalDataset/radar_v1/RADIal/",
+        "root_dir": "/home/shuxs23/Dataset/RADIaL/RADlal_rdy_to_use/RADIal/",
         "geometry":{
             "ranges": [512,896,1],
             "resolution": [0.201171875,0.2],

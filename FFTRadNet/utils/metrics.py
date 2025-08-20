@@ -187,8 +187,8 @@ def GetFullMetrics(predictions,object_labels,range_min=5,range_max=100,IOU_thres
             precision.append( 0) # When there is a detection, how much I m sure
             recall.append(0)
 
-        RangeError.append(range_error/nbObjects)
-        AngleError.append(angle_error/nbObjects)
+        RangeError.append(range_error / (nbObjects + 1e-3))
+        AngleError.append(angle_error / (nbObjects + 1e-3))
 
     perfs['precision']=precision
     perfs['recall']=recall

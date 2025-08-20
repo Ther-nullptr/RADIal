@@ -236,51 +236,14 @@ class RangeAngle_Decoder(nn.Module):
     def __init__(self, channels):
         super(RangeAngle_Decoder, self).__init__()
         
-        # Check if this is the original configuration
-        is_original = (channels == [32, 40, 48, 56])
+        self.deconv4 = nn.ConvTranspose2d(16, 16, kernel_size=3, stride=(2,1), padding=1, output_padding=(1,0))
         
-        # Calculate actual dimensions based on backbone output
-        c2_channels = channels[1] * 4  # x2 channels
-        c3_channels = channels[2] * 4  # x3 channels  
-        c4_channels = channels[3] * 4  # x4 channels
-        
-        # The spatial dimensions after backbone are fixed regardless of channel config:
-        # x4: [B, c4_channels, 16, 14] -> after transpose(1,3): [B, 14, 16, c4_channels] 
-        # x3: [B, c3_channels, 32, 28] -> after L3+transpose: [B, 28, 32, L3_output]
-        # x2: [B, c2_channels, 64, 56] -> after L2+transpose: [B, 56, 64, L2_output]
-        
-        width_x4_after_transpose = 14  # x4 width becomes channel dim
-        width_x3_after_transpose = 28  # x3 width becomes channel dim
-        width_x2_after_transpose = 56  # x2 width becomes channel dim
-        
-        if is_original:
-            # Original configuration values
-            l3_output_channels = 224
-            l2_output_channels = 224
-            conv_block4_output = 128
-            conv_block3_output = 256
-        else:
-            # Reduced configuration - scale down
-            l3_output_channels = 112  # 224/2
-            l2_output_channels = 112  # 224/2  
-            conv_block4_output = 64   # 128/2
-            conv_block3_output = 128  # 256/2
-        
-        # Top-down layers  
-        self.deconv4 = nn.ConvTranspose2d(width_x4_after_transpose, width_x4_after_transpose, 
-                                         kernel_size=3, stride=(2,1), padding=1, output_padding=(1,0))
-        
-        # Concatenation: deconv4 + L3_after_transpose  
-        self.conv_block4 = BasicBlock(width_x4_after_transpose + width_x3_after_transpose, conv_block4_output)
-        self.deconv3 = nn.ConvTranspose2d(conv_block4_output, conv_block4_output, 
-                                         kernel_size=3, stride=(2,1), padding=1, output_padding=(1,0))
-        
-        # Concatenation: deconv3 + L2_after_transpose
-        self.conv_block3 = BasicBlock(conv_block4_output + width_x2_after_transpose, conv_block3_output)
+        self.conv_block4 = BasicBlock(48,128)
+        self.deconv3 = nn.ConvTranspose2d(128, 128, kernel_size=3, stride=(2,1), padding=1, output_padding=(1,0))
+        self.conv_block3 = BasicBlock(192,256)
 
-        # Projection layers
-        self.L3  = nn.Conv2d(c3_channels, l3_output_channels, kernel_size=1, stride=1, padding=0)
-        self.L2  = nn.Conv2d(c2_channels, l2_output_channels, kernel_size=1, stride=1, padding=0)
+        self.L3  = nn.Conv2d(192, 224, kernel_size=1, stride=1,padding=0)
+        self.L2  = nn.Conv2d(160, 224, kernel_size=1, stride=1,padding=0)
         
         
     def forward(self,features):
